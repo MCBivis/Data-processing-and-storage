@@ -49,10 +49,9 @@ class KeyClient {
             byte[] certBytes = in.readNBytes(certLen);
 
 
-            String base = name.replaceAll("[^A-Za-z0-9_-]", "_");
-            try (FileOutputStream kf = new FileOutputStream(base + ".key")) { kf.write(keyBytes); }
-            try (FileOutputStream cf = new FileOutputStream(base + ".crt")) { cf.write(certBytes); }
-            System.out.println("Saved " + base + ".key and " + base + ".crt");
+            try (FileOutputStream kf = new FileOutputStream(name + ".key")) { kf.write(keyBytes); }
+            try (FileOutputStream cf = new FileOutputStream(name + ".crt")) { cf.write(certBytes); }
+            System.out.println("Saved " + name + ".key and " + name + ".crt");
         }
     }
 

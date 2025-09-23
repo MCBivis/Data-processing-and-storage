@@ -5,7 +5,6 @@ import org.bouncycastle.asn1.x500.X500Name;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.security.cert.CertificateFactory;
 
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
@@ -31,40 +30,22 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class KeyServer {
-    // ==== Конфигурация и основные структуры ====
-
-    private final int port; // TCP-порт для прослушивания
-
-    // Пул нитей, которые генерируют ключи (compute-heavy tasks)
+    private final int port;
     private final ExecutorService genPool;
-
-    // Очередь задач на отправку — сюда кладём (SocketChannel, CompletableFuture<KeyRecord>)
-    // Отдельный отправляющий поток будет доставлять готовые ключи клиентам
     private final BlockingQueue<SendTask> sendQueue = new LinkedBlockingQueue<>();
-
-    // Map имени -> Future записи с ключами. Если одна и та же строка придёт несколько раз,
-    // мы возвращаем один и тот же Future, чтобы не генерировать ключи дважды.
     private final ConcurrentMap<String, CompletableFuture<KeyRecord>> nameMap = new ConcurrentHashMap<>();
-
-    // Флаги жизненного цикла
     private final AtomicBoolean running = new AtomicBoolean(true);
-
     private final PrivateKey issuerKey;
     private final X500Name issuerName;
-    private final X509Certificate issuerCert;
 
-    // ====== Конструктор ======
-    public KeyServer(int port, int genThreads, PrivateKey issuerKey, X500Name issuerName, X509Certificate issuerCert) {
+    public KeyServer(int port, int genThreads, PrivateKey issuerKey, X500Name issuerName) {
         this.port = port;
         this.genPool = Executors.newFixedThreadPool(Math.max(1, genThreads));
         this.issuerKey = issuerKey;
         this.issuerName = issuerName;
-        this.issuerCert = issuerCert;
     }
 
-    // ====== Основной цикл сервера (Selector) ======
     public void start() throws IOException {
-        // Sender thread — читает из sendQueue и отсылает байты клиентам в блокирующем режиме
         Thread sender = new Thread(this::senderLoop, "sender-thread");
         sender.setDaemon(true);
         sender.start();
@@ -93,13 +74,11 @@ public class KeyServer {
                 } catch (CancelledKeyException cke) {
                     // клиент мог закрыть соединение — игнорируем
                 } catch (IOException ex) {
-                    // логирование и закрытие канала
                     closeSilently((SocketChannel) key.channel());
                 }
             }
         }
-
-        // tidy up
+        // очистка
         ssc.close();
         selector.close();
         genPool.shutdownNow();
@@ -108,7 +87,7 @@ public class KeyServer {
     private void doAccept(ServerSocketChannel ssc, Selector selector) throws IOException {
         SocketChannel sc = ssc.accept();
         sc.configureBlocking(false);
-        // привязываем к ключу объект-аттачмент для накопления байтов имени
+        // привязываем к ключу объект для накопления байтов имени
         SelectionKey key = sc.register(selector, SelectionKey.OP_READ);
         key.attach(new ClientAttachment());
         System.out.println("Accepted connection from " + sc.getRemoteAddress());
@@ -133,22 +112,17 @@ public class KeyServer {
                 String name = new String(att.nameBytes.toByteArray(), StandardCharsets.US_ASCII);
                 System.out.println("Received name='" + name + "' from " + sc.getRemoteAddress());
 
-                // Получаем/создаём Future для этого имени и (если нужно) ставим задачу на генерацию
                 CompletableFuture<KeyRecord> future = nameMap.computeIfAbsent(name, n -> {
                     CompletableFuture<KeyRecord> f = new CompletableFuture<>();
-                    // Запускаем генерацию в пуле генераторов
                     genPool.submit(() -> generateKeyAndCertificate(n, f));
                     return f;
                 });
 
-                // Отменяем регистрацию на selector — дальше передачу результата делает senderLoop
                 key.cancel();
 
-                // Помещаем канал и future в очередь отправки
                 sendQueue.offer(new SendTask(sc, future));
 
-                // Готовим attachment для возможного следующего имени (если клиент останется на этом соединении)
-                return; // выходим, чтобы не читать лишние данные сейчас
+                return;
             } else {
                 att.nameBytes.write(b);
                 if (att.nameBytes.size() > 4096) {
@@ -168,18 +142,13 @@ public class KeyServer {
             kpg.initialize(8192);
             KeyPair kp = kpg.generateKeyPair();
 
-
-// Build X509 certificate with BouncyCastle
             Security.addProvider(new BouncyCastleProvider());
-
 
             X500Name subject = new X500Name("CN=" + name);
             BigInteger serial = new BigInteger(160, new SecureRandom());
             Date notBefore = Date.from(ZonedDateTime.now().minus(1, ChronoUnit.MINUTES).toInstant());
             Date notAfter = Date.from(ZonedDateTime.now().plus(365, ChronoUnit.DAYS).toInstant());
 
-
-            SubjectPublicKeyInfo spki = SubjectPublicKeyInfo.getInstance(kp.getPublic().getEncoded());
             X509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                     issuerName,
                     serial,
@@ -194,7 +163,7 @@ public class KeyServer {
             X509Certificate cert = new JcaX509CertificateConverter().setProvider("BC").getCertificate(certBuilder.build(signer));
 
 
-            KeyRecord kr = new KeyRecord(kp.getPrivate(), kp.getPublic(), cert);
+            KeyRecord kr = new KeyRecord(kp.getPrivate(), cert);
             future.complete(kr);
             System.out.println("Generated key+cert for '" + name + "'");
         } catch (Exception e) {
@@ -203,7 +172,6 @@ public class KeyServer {
         }
     }
 
-    // ====== Отправляющий поток: берёт (SocketChannel, Future) и отсылает результат клиенту ======
     private void senderLoop() {
         while (running.get()) {
             try {
@@ -215,14 +183,12 @@ public class KeyServer {
                     // блокируем здесь до готовности ключей
                     KeyRecord kr = future.get();
 
-                    // Переключаемся в блокирующий режим, чтобы удобно писать в OutputStream
                     sc.configureBlocking(true);
                     OutputStream out = sc.socket().getOutputStream();
 
-                    // Простой протокол (пример): сначала 4 байта длины приватного ключа (big-endian), затем ключ DER,
-                    // затем 4 байта длины сертификата и сертификат (DER). Если сертификата нет — длина 0.
+                    // сначала 4 байта длины приватного ключа, затем ключ, затем 4 байта длины сертификата и сертификат.
                     byte[] keyBytes = kr.privateKey.getEncoded();
-                    byte[] certBytes = (kr.cert == null) ? new byte[0] : kr.cert.getEncoded();
+                    byte[] certBytes = kr.cert.getEncoded();
 
                     writeInt(out, keyBytes.length);
                     out.write(keyBytes);
@@ -232,7 +198,6 @@ public class KeyServer {
 
                     System.out.println("Sent key+cert to " + sc.getRemoteAddress());
                 } catch (ExecutionException ee) {
-                    // Генерация упала: можно отправить ошибку в протоколе (в этом примере просто закрываем)
                     System.err.println("Generation failed: " + ee.getCause());
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
@@ -245,7 +210,6 @@ public class KeyServer {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (IOException io) {
-                // при ошибке с каналом — лог и пропуск
                 io.printStackTrace();
             }
         }
@@ -266,9 +230,7 @@ public class KeyServer {
         } catch (IOException ignored) {}
     }
 
-    // ====== Вспомогательные структуры ======
     private static class ClientAttachment {
-        // Накопительный буфер для чтения имени
         final ByteBuffer buffer = ByteBuffer.allocate(1024);
         final ByteArrayOutputStream nameBytes = new ByteArrayOutputStream();
     }
@@ -281,12 +243,10 @@ public class KeyServer {
 
     private static class KeyRecord {
         final PrivateKey privateKey;
-        final PublicKey publicKey;
-        final X509Certificate cert; // может быть null до тех пор, пока вы не добавите генерацию
-        KeyRecord(PrivateKey p, PublicKey pub, X509Certificate c) { privateKey = p; publicKey = pub; cert = c; }
+        final X509Certificate cert;
+        KeyRecord(PrivateKey p, X509Certificate c) { privateKey = p; cert = c; }
     }
 
-    // ====== Простой main (парсинг аргументов — минимально) ======
     public static void main(String[] args) throws Exception {
         int port = 5555;
         int gens = Runtime.getRuntime().availableProcessors();
@@ -317,11 +277,10 @@ public class KeyServer {
 
 
         PrivateKey issuerKey = loadPrivateKey(issuerKeyFile);
-        X509Certificate issuerCert = loadCertificate(issuerCertFile);
         X500Name issuerName = new X500Name(issuerCn);
 
 
-        KeyServer server = new KeyServer(port, gens, issuerKey, issuerName, issuerCert);
+        KeyServer server = new KeyServer(port, gens, issuerKey, issuerName);
         server.start();
     }
 
@@ -333,13 +292,6 @@ public class KeyServer {
         byte[] der = Base64.getDecoder().decode(pem);
         PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(der);
         return KeyFactory.getInstance("RSA").generatePrivate(spec);
-    }
-
-    public static X509Certificate loadCertificate(File certFile) throws Exception {
-        try (FileInputStream fis = new FileInputStream(certFile)) {
-            CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            return (X509Certificate) cf.generateCertificate(fis);
-        }
     }
 
 }
