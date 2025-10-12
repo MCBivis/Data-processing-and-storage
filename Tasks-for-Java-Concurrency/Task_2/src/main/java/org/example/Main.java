@@ -3,12 +3,12 @@ package org.example;
 import java.util.Scanner;
 
 public class Main {
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         CustomLinkedList list = new CustomLinkedList();
         Scanner sc = new Scanner(System.in);
 
         int numSorters = 2;
-        long delayMs = 1000;
+        long delayMs = 100;
 
         for (int i = 0; i < numSorters; i++) {
             new SorterThread(list, delayMs).start();

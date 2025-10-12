@@ -3,7 +3,7 @@ package org.example;
 import java.util.Iterator;
 
 public class CustomLinkedList implements Iterable<String> {
-    Node head;
+    private Node head = null;
 
     public void addFirst(String value) {
         if (head == null) {
@@ -24,11 +24,8 @@ public class CustomLinkedList implements Iterable<String> {
     public void setHead(Node newHead) {
         head.lock.lock();
         Node oldHead = head;
-        try {
-            head = newHead;
-        } finally {
-            oldHead.lock.unlock();
-        }
+        head = newHead;
+        oldHead.lock.unlock();
     }
 
     public Node getHead() {

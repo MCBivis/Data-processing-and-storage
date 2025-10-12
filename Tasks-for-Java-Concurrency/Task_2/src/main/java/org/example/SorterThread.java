@@ -21,19 +21,27 @@ public class SorterThread extends Thread {
     }
 
     private void bubblePass() throws InterruptedException {
-        if (list.head == null) return;
         Node prev = null;
 
         Node curr = list.getHead();
+        if (curr == null) return;
 
-        while (curr.next != null) {
+        while (true) {
             Node next = curr.next;
-
+            if (next == null) break;
             try {
+                if (prev != null) {
+                    prev.lock.lock();
+                }
                 curr.lock.lock();
                 next.lock.lock();
 
-                if (curr.value.compareTo(next.value) > 0 && curr.next == next) {
+                if (curr.next != next) return;
+                if (prev != null) {
+                    if (prev.next != curr) return;
+                }
+
+                if (curr.value.compareTo(next.value) > 0) {
                     if (prev == null) {
                         list.setHead(next);
                         curr.next = next.next;
@@ -43,12 +51,14 @@ public class SorterThread extends Thread {
                         curr.next = next.next;
                         next.next = curr;
                     }
-                    System.out.println(curr.value);
-                    System.out.println(next.value);
+                    System.out.println(curr.value + " \uD83D\uDD04 " + next.value);
                 }
             } finally {
                 next.lock.unlock();
                 curr.lock.unlock();
+                if (prev != null) {
+                    prev.lock.unlock();
+                }
             }
 
             prev = curr;
