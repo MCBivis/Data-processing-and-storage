@@ -11,21 +11,15 @@ public class CustomLinkedList implements Iterable<String> {
         } else {
             head.lock.lock();
             Node oldHead = head;
-            try {
-                Node node = new Node(value);
-                node.next = head;
-                head = node;
-            } finally {
-                oldHead.lock.unlock();
-            }
+            Node node = new Node(value);
+            node.next = head;
+            head = node;
+            oldHead.lock.unlock();
         }
     }
 
     public void setHead(Node newHead) {
-        head.lock.lock();
-        Node oldHead = head;
         head = newHead;
-        oldHead.lock.unlock();
     }
 
     public Node getHead() {
