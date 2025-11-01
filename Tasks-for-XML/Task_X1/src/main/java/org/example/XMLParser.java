@@ -52,7 +52,7 @@ public class XMLParser {
         postProcessData();
 
         // Валидация данных
-        validateData();
+       // validateData();
     }
 
     private void handleStartElement(XMLStreamReader reader) {
@@ -80,7 +80,7 @@ public class XMLParser {
                     }
                 }
 
-                currentPerson = persons.getOrDefault(id, new Person(id));
+                currentPerson = persons.getOrDefault(id.trim(), new Person(id.trim()));
 
                 // Если person имеет атрибут name, это может быть fullname
                 String nameAttr = currentAttributes.get("name");
@@ -105,18 +105,127 @@ public class XMLParser {
         String elementName = reader.getLocalName();
         String text = currentText.toString().trim();
         Person relative;
+        String value;
+        String[] parts;
 
         if (currentPerson == null) return;
 
         switch (elementName) {
             case "brother":
-                currentPerson.addBrother(text);
+                relative = persons.getOrDefault(text, new Person(text));
+                currentPerson.addBrother(relative);
+                relative.addSibling(currentPerson);
+                relative.setGender("male");
+                parts = text.split(" ", 2);
+                if (parts.length > 0) {
+                    relative.setFirstName(parts[0]);
+                }
+                if (parts.length > 1) {
+                    relative.setLastName(parts[1]);
+                }
                 break;
 
             case "child":
                 relative = persons.getOrDefault(text, new Person(text));
                 currentPerson.addChild(relative);
                 relative.addParent(currentPerson);
+                parts = text.split(" ", 2);
+                if (parts.length > 0) {
+                    relative.setFirstName(parts[0]);
+                }
+                if (parts.length > 1) {
+                    relative.setLastName(parts[1]);
+                }
+                break;
+
+            case "children-number":
+                value = currentAttributes.get("value");
+                currentPerson.setChildrenNumber(Integer.parseInt(value));
+                break;
+
+            case "daughter":
+                value = currentAttributes.get("id");
+                relative = persons.getOrDefault(value, new Person(value));
+                currentPerson.addChild(relative);
+                relative.addParent(currentPerson);
+                relative.setGender("female");
+                relative.setId(value);
+                break;
+
+            case "family":
+            case "family-name":
+                currentPerson.setLastName(text);
+                break;
+
+            case "father":
+                relative = persons.getOrDefault(text, new Person(text));
+                currentPerson.addParent(relative);
+                relative.addChild(currentPerson);
+                relative.setGender("male");
+                parts = text.split(" ", 2);
+                if (parts.length > 0) {
+                    relative.setFirstName(parts[0]);
+                }
+                if (parts.length > 1) {
+                    relative.setLastName(parts[1]);
+                }
+                break;
+
+            case "first":
+            case "firstname":
+                if (!text.isEmpty()) {
+                    currentPerson.setFirstName(text);
+                } else {
+                    value = currentAttributes.get("value").trim();
+                    currentPerson.setFirstName(value);
+                }
+                break;
+
+            case "gender":
+                if (!text.isEmpty()) {
+                    currentPerson.setGender(normalizeGender(text));
+                } else {
+                    value = currentAttributes.get("value");
+                    currentPerson.setGender(normalizeGender(value));
+                }
+                break;
+
+            case "husband":
+                value = currentAttributes.get("value");
+                relative = persons.getOrDefault(value, new Person(value));
+                currentPerson.setSpouse(relative);
+                relative.setSpouse(currentPerson);
+                relative.setGender("male");
+                relative.setId(value);
+                break;
+
+            case "id":
+                value = currentAttributes.get("value");
+                currentPerson.setId(value);
+                break;
+
+            case "mother":
+                relative = persons.getOrDefault(text, new Person(text));
+                currentPerson.addParent(relative);
+                relative.addChild(currentPerson);
+                relative.setGender("female");
+                parts = text.split(" ", 2);
+                if (parts.length > 0) {
+                    relative.setFirstName(parts[0]);
+                }
+                if (parts.length > 1) {
+                    relative.setLastName(parts[1]);
+                }
+                break;
+
+            case "parent":
+                value = currentAttributes.get("value");
+                if (value != null && !"UNKNOWN".equals(value)) {
+                    relative = persons.getOrDefault(value, new Person(value));
+                    currentPerson.addParent(relative);
+                    relative.addChild(currentPerson);
+                    relative.setId(value);
+                }
                 break;
 
             case "person":
@@ -124,196 +233,113 @@ public class XMLParser {
                 currentPerson = null;
                 break;
 
-            case "id":
-                if (!text.isEmpty()) {
-                    String newId = text;
-                    // Если ID изменился, нужно обновить запись
-                    if (!newId.equals(currentPerson.getId())) {
-                        Person existingPerson = persons.get(newId);
-                        if (existingPerson != null) {
-                            // Объединяем данные
-                            mergePersons(existingPerson, currentPerson);
-                            currentPerson = existingPerson;
-                        } else {
-                            currentPerson.setId(newId);
-                            persons.put(newId, currentPerson);
-                            persons.remove(currentPerson.getId()); // удаляем старую запись
-                        }
+            case "siblings":
+                value = currentAttributes.get("val");
+                if (value != null) {
+                    parts = value.split(" ", 2);
+                    if (parts.length > 0) {
+                        relative = persons.getOrDefault(parts[0], new Person(parts[0]));
+                        currentPerson.addSibling(relative);
+                        relative.addSibling(currentPerson);
+                        relative.setId(parts[0]);
                     }
-                }
-                break;
-
-            case "firstname":
-            case "first":
-                if (!text.isEmpty()) {
-                    currentPerson.setFirstName(text);
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        currentPerson.setFirstName(value);
-                    }
-                }
-                break;
-
-            case "surname":
-            case "family-name":
-            case "family":
-                if (!text.isEmpty()) {
-                    currentPerson.setLastName(text);
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        currentPerson.setLastName(value);
-                    }
-                }
-                break;
-
-            case "fullname":
-                // Обрабатываем структурированный fullname
-                // Если внутри fullname были first и family, они уже обработаны
-                break;
-
-            case "gender":
-                if (!text.isEmpty()) {
-                    currentPerson.setGender(normalizeGender(text));
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        currentPerson.setGender(normalizeGender(value));
-                    }
-                }
-                break;
-
-            case "spouce":
-            case "spouse":
-            case "husband":
-            case "wife":
-                if (!text.isEmpty()) {
-                    currentPerson.setSpouse(text);
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        currentPerson.setSpouse(value);
-                    }
-                }
-                break;
-
-            case "children-number":
-                if (!text.isEmpty()) {
-                    try {
-                        currentPerson.setChildrenNumber(Integer.parseInt(text));
-                    } catch (NumberFormatException e) {
-                        System.err.println("Invalid children-number: " + text);
-                    }
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        try {
-                            currentPerson.setChildrenNumber(Integer.parseInt(value));
-                        } catch (NumberFormatException e) {
-                            System.err.println("Invalid children-number: " + value);
-                        }
+                    if (parts.length > 1) {
+                        relative = persons.getOrDefault(parts[1], new Person(parts[1]));
+                        currentPerson.addSibling(relative);
+                        relative.addSibling(currentPerson);
+                        relative.setId(parts[1]);
                     }
                 }
                 break;
 
             case "siblings-number":
-                if (!text.isEmpty()) {
-                    try {
-                        currentPerson.setSiblingsNumber(Integer.parseInt(text));
-                    } catch (NumberFormatException e) {
-                        System.err.println("Invalid siblings-number: " + text);
-                    }
-                } else {
-                    String value = currentAttributes.get("value");
-                    if (value != null) {
-                        try {
-                            currentPerson.setSiblingsNumber(Integer.parseInt(value));
-                        } catch (NumberFormatException e) {
-                            System.err.println("Invalid siblings-number: " + value);
-                        }
-                    }
-                }
+                value = currentAttributes.get("value");
+                currentPerson.setSiblingsNumber(Integer.parseInt(value));
                 break;
 
-            case "father":
+            case "sister":
                 relative = persons.getOrDefault(text, new Person(text));
-                currentPerson.addParent(relative);
-                relative.addChild(currentPerson);
-                relative.setGender("M");
-                break;
-            case "mother":
-                relative = persons.getOrDefault(text, new Person(text));
-                currentPerson.addParent(relative);
-                relative.addChild(currentPerson);
-                relative.setGender("F");
-                break;
-            case "parent":
-                if (text.isEmpty()) {
-                    String value = currentAttributes.get("value");
-                    if (value != null && !"UNKNOWN".equals(value)) {
-                        relative = persons.getOrDefault(value, new Person(value));
-                        currentPerson.addParent(relative);
-                        relative.addChild(currentPerson);
-                    }
+                currentPerson.addSister(relative);
+                relative.addSibling(currentPerson);
+                relative.setGender("female");
+                parts = text.split(" ", 2);
+                if (parts.length > 0) {
+                    relative.setFirstName(parts[0]);
+                }
+                if (parts.length > 1) {
+                    relative.setLastName(parts[1]);
                 }
                 break;
 
             case "son":
-                relative = persons.getOrDefault(text, new Person(text));
+                value = currentAttributes.get("id");
+                relative = persons.getOrDefault(value, new Person(value));
                 currentPerson.addChild(relative);
                 relative.addParent(currentPerson);
-                relative.setGender("M");
-                break;
-            case "daughter":
-                relative = persons.getOrDefault(text, new Person(text));
-                currentPerson.addChild(relative);
-                relative.addParent(currentPerson);
-                relative.setGender("F");
+                relative.setGender("male");
+                relative.setId(value);
                 break;
 
-            case "sister":
-                String sisterId = currentAttributes.get("id");
-                if (sisterId != null) {
-                    currentPerson.addSister(sisterId);
-                } else if (!text.isEmpty()) {
-                    currentPerson.addSister(text);
+            case "spouce":
+                value = currentAttributes.get("value");
+                if (value != null && !"UNKNOWN".equals(value)) {
+                    relative = persons.getOrDefault(value.trim(), new Person(value.trim()));
+                    currentPerson.setSpouse(relative);
+                    relative.setSpouse(currentPerson);
+                    parts = value.split(" ", 2);
+                    if (parts.length > 0) {
+                        relative.setFirstName(parts[0]);
+                    }
+                    if (parts.length > 1) {
+                        relative.setLastName(parts[1]);
+                    }
                 }
                 break;
 
-            case "siblings":
-                String siblingId = currentAttributes.get("val");
-                if (siblingId != null) {
-                    // Временно сохраняем sibling без определения пола
-                    currentPerson.addSibling(siblingId);
-                }
+            case "surname":
+                value = currentAttributes.get("value");
+                currentPerson.setLastName(value.trim());
+                break;
+
+            case "wife":
+                value = currentAttributes.get("value");
+                relative = persons.getOrDefault(value, new Person(value));
+                currentPerson.setSpouse(relative);
+                relative.setSpouse(currentPerson);
+                relative.setGender("female");
+                relative.setId(value);
                 break;
         }
     }
 
     private void postProcessData() {
-        // Обрабатываем временные sibling связи и определяем пол
+        List<String> toRemove = new ArrayList<>();
         for (Person person : persons.values()) {
-            // Обрабатываем siblings с неизвестным полом
-            for (String siblingId : person.getSiblings()) {
-                Person sibling = persons.get(siblingId);
+            if (person.getId().split(" ", 2).length == 1){
+                String fullname = person.getFirstName() + " " + person.getLastName();
+                if (persons.containsKey(fullname)) {
+                    mergePersons(persons.get(fullname), person);
+                    toRemove.add(fullname);
+                }
+            }
+        }
+        for(String remove : toRemove){
+            persons.remove(remove);
+        }
+        for (Person person : persons.values()) {
+            for (Person sibling : person.getSiblings()) {
                 if (sibling != null) {
                     if ("male".equals(sibling.getGender())) {
-                        person.addBrother(siblingId);
+                        person.addBrother(sibling);
                     } else if ("female".equals(sibling.getGender())) {
-                        person.addSister(siblingId);
+                        person.addSister(sibling);
                     } else {
-                        // Если пол неизвестен, добавляем в оба списка (как было раньше)
-                        person.addBrother(siblingId);
-                        person.addSister(siblingId);
+                     //   System.out.println(person.getId() + " без пола");
                     }
                 }
             }
             // Очищаем временный список siblings
             person.clearSiblings();
-
-            // Удаляем дубликаты из всех списков
-            person.removeDuplicates();
         }
     }
 
@@ -328,9 +354,9 @@ public class XMLParser {
 
         for (Person parent : source.getParents()) target.addParent(parent);
         for (Person child : source.getChildren()) target.addChild(child);
-        for (String brother : source.getBrothers()) target.addBrother(brother);
-        for (String sister : source.getSisters()) target.addSister(sister);
-        for (String sibling : source.getSiblings()) target.addSibling(sibling);
+        for (Person brother : source.getBrothers()) target.addBrother(brother);
+        for (Person sister : source.getSisters()) target.addSister(sister);
+        for (Person sibling : source.getSiblings()) target.addSibling(sibling);
     }
 
     private String normalizeGender(String gender) {
@@ -338,10 +364,8 @@ public class XMLParser {
 
         switch (gender.toUpperCase()) {
             case "M":
-            case "MALE":
                 return "male";
             case "F":
-            case "FEMALE":
                 return "female";
             default:
                 return gender.toLowerCase();
@@ -413,7 +437,9 @@ public class XMLParser {
         writeElement(writer, "firstname", person.getFirstName(), indent + 1);
         writeElement(writer, "surname", person.getLastName(), indent + 1);
         writeElement(writer, "gender", person.getGender(), indent + 1);
-        writeElement(writer, "spouse", person.getSpouse(), indent + 1);
+        if (person.getSpouse() != null) {
+            writeElement(writer, "spouse", person.getSpouse().getId(), indent + 1);
+        }
 
         // Родители
         if (!person.getParents().isEmpty()) {
@@ -447,8 +473,8 @@ public class XMLParser {
             writeIndent(writer, indent + 1);
             writer.writeStartElement("brothers");
             writer.writeCharacters("\n");
-            for (String brother : person.getBrothers()) {
-                writeElement(writer, "brother", brother, indent + 2);
+            for (Person brother : person.getBrothers()) {
+                writeElement(writer, "brother", brother.getId(), indent + 2);
             }
             writeIndent(writer, indent + 1);
             writer.writeEndElement();
@@ -460,8 +486,8 @@ public class XMLParser {
             writeIndent(writer, indent + 1);
             writer.writeStartElement("sisters");
             writer.writeCharacters("\n");
-            for (String sister : person.getSisters()) {
-                writeElement(writer, "sister", sister, indent + 2);
+            for (Person sister : person.getSisters()) {
+                writeElement(writer, "sister", sister.getId(), indent + 2);
             }
             writeIndent(writer, indent + 1);
             writer.writeEndElement();

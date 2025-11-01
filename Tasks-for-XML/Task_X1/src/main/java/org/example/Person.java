@@ -8,12 +8,12 @@ public class Person {
     private String firstName;
     private String lastName;
     private String gender;
-    private String spouse;
+    private Person spouse;
     private Set<Person> parents;
     private Set<Person> children;
-    private Set<String> brothers;
-    private Set<String> sisters;
-    private Set<String> siblings; // Временное хранение siblings с неизвестным полом
+    private Set<Person> brothers;
+    private Set<Person> sisters;
+    private Set<Person> siblings; // Временное хранение siblings с неизвестным полом
     private Integer childrenNumber;
     private Integer siblingsNumber;
 
@@ -39,8 +39,8 @@ public class Person {
     public String getGender() { return gender; }
     public void setGender(String gender) { this.gender = gender; }
 
-    public String getSpouse() { return spouse; }
-    public void setSpouse(String spouse) { this.spouse = spouse; }
+    public Person getSpouse() { return spouse; }
+    public void setSpouse(Person spouse) { this.spouse = spouse; }
 
     public List<Person> getParents() { return new ArrayList<>(parents); }
     public void addParent(Person parentId) { parents.add(parentId); }
@@ -48,14 +48,14 @@ public class Person {
     public List<Person> getChildren() { return new ArrayList<>(children); }
     public void addChild(Person childId) { children.add(childId); }
 
-    public List<String> getBrothers() { return new ArrayList<>(brothers); }
-    public void addBrother(String brotherId) { brothers.add(brotherId); }
+    public List<Person> getBrothers() { return new ArrayList<>(brothers); }
+    public void addBrother(Person brotherId) { brothers.add(brotherId); }
 
-    public List<String> getSisters() { return new ArrayList<>(sisters); }
-    public void addSister(String sisterId) { sisters.add(sisterId); }
+    public List<Person> getSisters() { return new ArrayList<>(sisters); }
+    public void addSister(Person sisterId) { sisters.add(sisterId); }
 
-    public List<String> getSiblings() { return new ArrayList<>(siblings); }
-    public void addSibling(String siblingId) { siblings.add(siblingId); }
+    public List<Person> getSiblings() { return new ArrayList<>(siblings); }
+    public void addSibling(Person siblingId) { siblings.add(siblingId); }
     public void clearSiblings() { siblings.clear(); }
 
     public Integer getChildrenNumber() { return childrenNumber; }
@@ -63,10 +63,6 @@ public class Person {
 
     public Integer getSiblingsNumber() { return siblingsNumber; }
     public void setSiblingsNumber(Integer siblingsNumber) { this.siblingsNumber = siblingsNumber; }
-
-    public void removeDuplicates() {
-        // HashSet автоматически удаляет дубликаты
-    }
 
     @Override
     public boolean equals(Object o) {
