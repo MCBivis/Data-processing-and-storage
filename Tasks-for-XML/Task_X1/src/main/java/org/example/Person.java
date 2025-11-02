@@ -16,6 +16,7 @@ public class Person {
     private Set<Person> siblings; // Временное хранение siblings с неизвестным полом
     private Integer childrenNumber;
     private Integer siblingsNumber;
+    private Integer unknownParents;
 
     public Person(String id) {
         this.id = id;
@@ -24,6 +25,7 @@ public class Person {
         this.brothers = new HashSet<>();
         this.sisters = new HashSet<>();
         this.siblings = new HashSet<>();
+        this.unknownParents = 0;
     }
 
     // Геттеры и сеттеры
@@ -47,6 +49,7 @@ public class Person {
 
     public List<Person> getChildren() { return new ArrayList<>(children); }
     public void addChild(Person childId) { children.add(childId); }
+    public void removeChild(Person childId) { children.remove(childId); }
 
     public List<Person> getBrothers() { return new ArrayList<>(brothers); }
     public void addBrother(Person brotherId) { brothers.add(brotherId); }
@@ -64,6 +67,28 @@ public class Person {
     public Integer getSiblingsNumber() { return siblingsNumber; }
     public void setSiblingsNumber(Integer siblingsNumber) { this.siblingsNumber = siblingsNumber; }
 
+    public Integer getUnknownParents() { return unknownParents; }
+    public void incUnknownParents() { unknownParents++; }
+
+    public void removeDublicatedElements() {
+        Set<Person> cleaner = new HashSet<>(parents);
+        parents.clear();
+        parents.addAll(cleaner);
+
+        cleaner = new HashSet<>(children);
+        children.clear();
+        children.addAll(cleaner);
+
+        cleaner = new HashSet<>(brothers);
+        brothers.clear();
+        brothers.addAll(cleaner);
+
+        cleaner = new HashSet<>(sisters);
+        sisters.clear();
+        sisters.addAll(cleaner);
+
+        cleaner.clear();
+    }
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

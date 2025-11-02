@@ -12,7 +12,6 @@ public class Main {
         System.out.println("Всего уникальных элементов: " + elementNames.size());
         System.out.println("Список элементов:");
         elementNames.stream().sorted().forEach(System.out::println);
-
         XMLParser parser = new XMLParser();
         parser.parseXML(input);
         parser.writeStructuredXML(output);
