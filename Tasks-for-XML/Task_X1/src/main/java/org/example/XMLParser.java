@@ -17,6 +17,8 @@ public class XMLParser {
     private Map<String, String> currentAttributes;
     private int tempIdCounter;
     private Integer peopleCounter;
+    private ArrayList<String> problemPeopleNames;
+    private ArrayList<Person> problemPeoples;
 
     public XMLParser() {
         this.persons = new HashMap<>();
@@ -25,6 +27,8 @@ public class XMLParser {
         this.currentAttributes = new HashMap<>();
         this.tempIdCounter = 0;
         this.peopleCounter = 0;
+        this.problemPeopleNames = new ArrayList<>();
+        this.problemPeoples = new ArrayList<>();
     }
 
     public void parseXML(String inputFile) throws Exception {
@@ -79,11 +83,15 @@ public class XMLParser {
                     id = "TEMP_" + (tempIdCounter++);
                 }
             }
-
-            currentPerson = persons.getOrDefault(id, new Person(id));
-
             // Если person имеет атрибут name, это может быть fullname
             String nameAttr = normalizeSpaces(currentAttributes.get("name"));
+
+            if (nameAttr != null) {
+                currentPerson = new Person(id);
+            }else {
+                currentPerson = persons.getOrDefault(id, new Person(id));
+            }
+
             if (nameAttr != null && currentPerson.getFirstName() == null) {
                 // Пробуем разбить полное имя на first и last
                 String[] nameParts = nameAttr.split(" ", 2);
@@ -108,7 +116,7 @@ public class XMLParser {
 
         switch (elementName) {
             case "brother":
-                relative = persons.getOrDefault(text, new Person(text));
+                relative = new Person(text);
                 currentPerson.addBrother(relative);
                 relative.setGender("male");
                 parts = text.split(" ", 2);
@@ -122,7 +130,7 @@ public class XMLParser {
                 break;
 
             case "child":
-                relative = persons.getOrDefault(text, new Person(text));
+                relative = new Person(text);
                 currentPerson.addChild(relative);
                 parts = text.split(" ", 2);
                 if (parts.length > 0) {
@@ -153,7 +161,7 @@ public class XMLParser {
                 break;
 
             case "father":
-                relative = persons.getOrDefault(text, new Person(text));
+                relative = new Person(text);
                 currentPerson.addParent(relative);
                 relative.setGender("male");
                 parts = text.split(" ", 2);
@@ -200,7 +208,7 @@ public class XMLParser {
                 break;
 
             case "mother":
-                relative = persons.getOrDefault(text, new Person(text));
+                relative = new Person(text);
                 currentPerson.addParent(relative);
                 relative.setGender("female");
                 parts = text.split(" ", 2);
@@ -258,7 +266,7 @@ public class XMLParser {
                 break;
 
             case "sister":
-                relative = persons.getOrDefault(text, new Person(text));
+                relative = new Person(text);
                 currentPerson.addSister(relative);
                 relative.setGender("female");
                 parts = text.split(" ", 2);
@@ -283,7 +291,7 @@ public class XMLParser {
             case "spouce":
                 value = normalizeSpaces(currentAttributes.get("value"));
                 if (value != null && !"NONE".equals(value)) {
-                    relative = persons.getOrDefault(value, new Person(value));
+                    relative = new Person(value);
                     currentPerson.setSpouse(relative);
                     parts = value.split(" ", 2);
                     if (parts.length > 0) {
@@ -320,10 +328,15 @@ public class XMLParser {
                 IDs.put(fullname, person.getId());
                 if (persons.containsKey(fullname)) {
                     mergePersons(person, persons.get(fullname));
+                    int err = mergePersons(person, persons.get(fullname));
+                    if (err == 1){
+                        problemPeopleNames.add(fullname);
+                    }
                     toRemove.add(fullname);
                 }
             }
         }
+
         for(String remove : toRemove){
             persons.remove(remove);
         }
@@ -360,39 +373,123 @@ public class XMLParser {
                 }
             }
             for (Person sibling : person.getSiblings()) {
-                if (sibling != null) {
-                    String gender = sibling.getGender();
-                    if (gender == null){
-                        gender = persons.get(sibling.getId()).getGender();
-                    }
-                    if ("male".equals(gender)) {
-                        person.addBrother(sibling);
-                    } else if ("female".equals(gender)) {
-                        person.addSister(sibling);
-                    } else {
-                        System.err.println(sibling.getId() + " без пола");
-                    }
+                String gender = sibling.getGender();
+                if (gender == null){
+                    gender = persons.get(sibling.getId()).getGender();
+                }
+                if ("male".equals(gender)) {
+                    person.addBrother(sibling);
+                } else if ("female".equals(gender)) {
+                    person.addSister(sibling);
+                } else {
+                    System.err.println(sibling.getId() + " без пола");
                 }
             }
             // Очищаем временный список siblings
             person.clearSiblings();
             person.removeDublicatedElements();
+            if (problemPeopleNames.contains(person.getFirstName() + " " + person.getLastName())) {
+                problemPeoples.add(person);
+            }
+        }
+
+        for (Person person : problemPeoples) {
+            System.out.println(person.getId());
+            for (Person brother : person.getBrothers()) {
+                if (!persons.get(brother.getId()).getBrothers().contains(person) && !persons.get(brother.getId()).getSisters().contains(person)) {
+                    person.removeBrother(brother);
+                    for (Person brother2 : persons.get(brother.getId()).getBrothers()){
+                        if (!persons.get(brother2.getId()).getBrothers().contains(brother)) {
+                            persons.get(brother2.getId()).addBrother(brother);
+                        }
+                    }
+                    for (Person sister2 : persons.get(brother.getId()).getSisters()){
+                        if (!persons.get(sister2.getId()).getBrothers().contains(brother)) {
+                            persons.get(sister2.getId()).addBrother(brother);
+                        }
+                    }
+                }
+            }
+            for (Person sister : person.getSisters()) {
+                if (!persons.get(sister.getId()).getBrothers().contains(person) && !persons.get(sister.getId()).getSisters().contains(person)) {
+                    person.removeSister(sister);
+                    for (Person brother2 : persons.get(sister.getId()).getBrothers()){
+                        if (!persons.get(brother2.getId()).getBrothers().contains(sister)) {
+                            persons.get(brother2.getId()).addSister(sister);
+                        }
+                    }
+                    for (Person sister2 : persons.get(sister.getId()).getSisters()){
+                        if (!persons.get(sister2.getId()).getBrothers().contains(sister)) {
+                            persons.get(sister2.getId()).addSister(sister);
+                        }
+                    }
+                }
+            }
+            if (person.getSpouse() != null) {
+                if (persons.get(person.getSpouse().getId()).getSpouse() != person && !person.getGender().equals(persons.get(person.getSpouse().getId()).getGender())) {
+                    persons.get(person.getSpouse().getId()).setSpouse(person);
+                }
+            }
+            if (person.getParents().size() == 1 && persons.get(person.getParents().getFirst().getId()).getSpouse() != null) {
+                person.addParent(persons.get(person.getParents().getFirst().getId()).getSpouse());
+            }
+            for (Person parent : person.getParents()) {
+                if (!persons.get(parent.getId()).getChildren().contains(person)) {
+                    persons.get(parent.getId()).addChild(person);
+                    for (Person child : persons.get(parent.getId()).getChildren()){
+                        if (!persons.get(child.getId()).getParents().contains(parent)) {
+                            persons.get(parent.getId()).removeChild(child);
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private void mergePersons(Person target, Person source) {
+    private int mergePersons(Person target, Person source) {
         // Объединяем данные из source в target
         if (source.getFirstName() != null) target.setFirstName(source.getFirstName());
         if (source.getLastName() != null) target.setLastName(source.getLastName());
-        if (source.getGender() != null) target.setGender(source.getGender());
-        if (source.getSpouse() != null) target.setSpouse(source.getSpouse());
-        if (source.getChildrenNumber() != null) target.setChildrenNumber(source.getChildrenNumber());
-        if (source.getSiblingsNumber() != null) target.setSiblingsNumber(source.getSiblingsNumber());
+        if (source.getGender() != null) {
+            if (target.getGender() != null){
+                if (!source.getGender().equals(target.getGender())){
+                    return 1;
+                }
+            }
+            target.setGender(source.getGender());
+        }
+        if (source.getSpouse() != null) {
+            if (target.getSpouse() != null){
+                if (!source.getSpouse().equals(target.getSpouse())){
+                    return 1;
+                }
+            }
+            target.setSpouse(source.getSpouse());
+        }
+        if (source.getChildrenNumber() != null) {
+            if (target.getChildrenNumber() != null){
+                if (!source.getChildrenNumber().equals(target.getChildrenNumber())){
+                    return 1;
+                }
+            }
+            target.setChildrenNumber(source.getChildrenNumber());
+        }
+        if (source.getSiblingsNumber() != null) {
+            if (target.getSiblingsNumber() != null){
+                if (!source.getSiblingsNumber().equals(target.getSiblingsNumber())){
+                    return 1;
+                }
+            }
+            target.setSiblingsNumber(source.getSiblingsNumber());
+        }
         for (int i=0; i<source.getUnknownParents() && target.getUnknownParents() < 2; i++) {
             target.incUnknownParents();
         }
 
         for (Person parent : source.getParents()){
+            if (target.getUnknownParents() == 2){
+                return 1;
+            }
             if (!target.getSiblings().contains(parent) && !target.getBrothers().contains(parent) && !target.getSisters().contains(parent)) {
                 target.addParent(parent);
             }
@@ -417,6 +514,7 @@ public class XMLParser {
                 target.addSibling(sibling);
             }
         }
+        return 0;
     }
 
     private String normalizeGender(String gender) {
@@ -441,13 +539,10 @@ public class XMLParser {
         int warnings = 0;
         for (Person person : persons.values()) {
             // Проверка количества детей
-            if (person.getChildrenNumber() != null &&
-                    person.getChildren().size() != person.getChildrenNumber()) {
-                if (warnings < 50) { // Ограничим вывод предупреждений
-                    System.err.println("Warning: Person " + person.getId() +
-                            " children count mismatch. Expected: " + person.getChildrenNumber() +
-                            ", Actual: " + person.getChildren().size());
-                }
+            if (person.getChildrenNumber() != null && person.getChildren().size() != person.getChildrenNumber()) {
+                System.err.println("Warning: Person " + person.getId() +
+                        " children count mismatch. Expected: " + person.getChildrenNumber() +
+                        ", Actual: " + person.getChildren().size());
                 warnings++;
             }
 
@@ -455,17 +550,12 @@ public class XMLParser {
             if (person.getSiblingsNumber() != null) {
                 int totalSiblings = person.getBrothers().size() + person.getSisters().size();
                 if (totalSiblings != person.getSiblingsNumber()) {
-                    if (warnings < 50) {
-                        System.err.println("Warning: Person " + person.getId() +
-                                " siblings count mismatch. Expected: " + person.getSiblingsNumber() +
-                                ", Actual: " + totalSiblings);
-                    }
+                    System.err.println("Warning: Person " + person.getId() +
+                            " siblings count mismatch. Expected: " + person.getSiblingsNumber() +
+                            ", Actual: " + totalSiblings);
                     warnings++;
                 }
             }
-        }
-        if (warnings >= 50) {
-            System.err.println("... and " + (warnings - 50) + " more warnings");
         }
         System.out.println("Total validation warnings: " + warnings);
     }

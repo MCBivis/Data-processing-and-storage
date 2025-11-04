@@ -53,9 +53,11 @@ public class Person {
 
     public List<Person> getBrothers() { return new ArrayList<>(brothers); }
     public void addBrother(Person brotherId) { brothers.add(brotherId); }
+    public void removeBrother(Person brotherId) { brothers.remove(brotherId); }
 
     public List<Person> getSisters() { return new ArrayList<>(sisters); }
     public void addSister(Person sisterId) { sisters.add(sisterId); }
+    public void removeSister(Person sisterId) { sisters.remove(sisterId); }
 
     public List<Person> getSiblings() { return new ArrayList<>(siblings); }
     public void addSibling(Person siblingId) { siblings.add(siblingId); }
