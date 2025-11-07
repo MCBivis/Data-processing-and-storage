@@ -1,12 +1,8 @@
 package org.example;
 
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamReader;
-import javax.xml.stream.XMLStreamWriter;
-import javax.xml.stream.XMLOutputFactory;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+import jakarta.xml.bind.*;
+import javax.xml.stream.*;
+import java.io.*;
 import java.util.*;
 
 public class XMLParser {
@@ -16,7 +12,6 @@ public class XMLParser {
     private StringBuilder currentText;
     private Map<String, String> currentAttributes;
     private int tempIdCounter;
-    private Integer peopleCounter;
     private ArrayList<String> problemPeopleNames;
     private ArrayList<Person> problemPeoples;
 
@@ -26,7 +21,6 @@ public class XMLParser {
         this.currentText = new StringBuilder();
         this.currentAttributes = new HashMap<>();
         this.tempIdCounter = 0;
-        this.peopleCounter = 0;
         this.problemPeopleNames = new ArrayList<>();
         this.problemPeoples = new ArrayList<>();
     }
@@ -341,7 +335,6 @@ public class XMLParser {
             persons.remove(remove);
         }
         for (Person person : persons.values()) {
-            peopleCounter++;
             if(person.getSpouse() != null) {
                 if (person.getSpouse().getId().split(" ", 2).length == 2) {
                     person.getSpouse().setId(IDs.get(person.getSpouse().getId()));
@@ -394,7 +387,6 @@ public class XMLParser {
         }
 
         for (Person person : problemPeoples) {
-            System.out.println(person.getId());
             for (Person brother : person.getBrothers()) {
                 if (!persons.get(brother.getId()).getBrothers().contains(person) && !persons.get(brother.getId()).getSisters().contains(person)) {
                     person.removeBrother(brother);
@@ -441,6 +433,30 @@ public class XMLParser {
                             persons.get(parent.getId()).removeChild(child);
                         }
                     }
+                }
+            }
+        }
+
+        for (Person person : persons.values()) {
+            if (person.getSpouse() != null) {
+                if (persons.get(person.getSpouse().getId()).getGender().equals("male")) {
+                    person.setHusband(person.getSpouse());
+                } else {
+                    person.setWife(person.getSpouse());
+                }
+            }
+            for (Person parent : person.getParents()) {
+                if (persons.get(parent.getId()).getGender().equals("male")) {
+                    person.setFather(parent);
+                } else {
+                    person.setMother(parent);
+                }
+            }
+            for (Person child : person.getChildren()) {
+                if (persons.get(child.getId()).getGender().equals("male")) {
+                    person.addSon(child);
+                } else {
+                    person.addDaughter(child);
                 }
             }
         }
@@ -561,135 +577,17 @@ public class XMLParser {
     }
 
     public void writeStructuredXML(String outputFile) throws Exception {
-        XMLOutputFactory factory = XMLOutputFactory.newInstance();
-        XMLStreamWriter writer = factory.createXMLStreamWriter(
-                new FileOutputStream(outputFile), "UTF-8");
+        People peopleWrapper = new People(persons.values());
 
-        writer.writeStartDocument("UTF-8", "1.0");
-        writer.writeCharacters("\n");
-        writer.writeStartElement("people");
-        writer.writeAttribute("count", peopleCounter.toString());
-        writer.writeCharacters("\n");
+        JAXBContext context = JAXBContext.newInstance(People.class, PersonForOutput.class);
+        Marshaller marshaller = context.createMarshaller();
 
-        for (Person person : persons.values()) {
-            writePersonElement(writer, person, 1);
-            writer.writeCharacters("\n");
-        }
+        marshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
 
-        writer.writeEndElement(); // people
-        writer.writeCharacters("\n");
-        writer.writeEndDocument();
-        writer.close();
-    }
+        marshaller.setSchema(javax.xml.validation.SchemaFactory
+                .newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI)
+                .newSchema(new File("src\\main\\resources\\people.xsd")));
 
-    private void writePersonElement(XMLStreamWriter writer, Person person, int indent) throws Exception {
-        writeIndent(writer, indent);
-        writer.writeStartElement("person");
-        writer.writeAttribute("id", person.getId());
-        writer.writeCharacters("\n");
-
-        writeElement(writer, "firstname", person.getFirstName(), indent + 1);
-        writeElement(writer, "lastname", person.getLastName(), indent + 1);
-        writeElement(writer, "gender", person.getGender(), indent + 1);
-        if (person.getSpouse() != null) {
-            String gender = person.getSpouse().getGender();
-
-            if (gender == null){
-                gender = persons.get(person.getSpouse().getId()).getGender();
-            }
-            if ("male".equals(gender)) {
-                writeElement(writer, "husband", person.getSpouse().getId(), indent + 1);
-            } else if ("female".equals(gender)) {
-                writeElement(writer, "wife", person.getSpouse().getId(), indent + 1);
-            } else {
-                System.err.println(person.getSpouse().getId() + " без пола");
-            }
-        }
-
-        // Родители
-        if (!person.getParents().isEmpty()) {
-            writeIndent(writer, indent + 1);
-            writer.writeStartElement("parents");
-            writer.writeCharacters("\n");
-            for (Person parent : person.getParents()) {
-                String gender = parent.getGender();
-                if (gender == null){
-                    gender = persons.get(parent.getId()).getGender();
-                }
-                if ("male".equals(gender)) {
-                    writeElement(writer, "father", parent.getId(), indent + 2);
-                } else if ("female".equals(gender)) {
-                    writeElement(writer, "mother", parent.getId(), indent + 2);
-                } else {
-                    System.err.println(parent.getId() + " без пола");
-                }
-            }
-            writeIndent(writer, indent + 1);
-            writer.writeEndElement();
-            writer.writeCharacters("\n");
-        }
-
-        // Дети
-        if (!person.getChildren().isEmpty()) {
-            writeIndent(writer, indent + 1);
-            writer.writeStartElement("children");
-            writer.writeCharacters("\n");
-            for (Person child : person.getChildren()) {
-                String gender = child.getGender();
-                if (gender == null){
-                    gender = persons.get(child.getId()).getGender();
-                }
-                if ("male".equals(gender)) {
-                    writeElement(writer, "son", child.getId(), indent + 2);
-                } else if ("female".equals(gender)) {
-                    writeElement(writer, "daughter", child.getId(), indent + 2);
-                } else {
-                    System.err.println(child.getId() + " без пола");
-                }
-            }
-            writeIndent(writer, indent + 1);
-            writer.writeEndElement();
-            writer.writeCharacters("\n");
-        }
-
-        if (!person.getBrothers().isEmpty() || !person.getSisters().isEmpty()) {
-            // Братья
-            writeIndent(writer, indent + 1);
-            writer.writeStartElement("siblings");
-            writer.writeCharacters("\n");
-            for (Person brother : person.getBrothers()) {
-                writeElement(writer, "brother", brother.getId(), indent + 2);
-            }
-            // Сестры
-            for (Person sister : person.getSisters()) {
-                writeElement(writer, "sister", sister.getId(), indent + 2);
-            }
-            writeIndent(writer, indent + 1);
-            writer.writeEndElement();
-            writer.writeCharacters("\n");
-        }
-
-        writeIndent(writer, indent);
-        writer.writeEndElement(); // person
-    }
-
-    private void writeElement(XMLStreamWriter writer, String name, String value, int indent) throws Exception {
-        if (value != null && !value.isEmpty()) {
-            writeIndent(writer, indent);
-            writer.writeStartElement(name);
-            writer.writeCharacters(value);
-            writer.writeEndElement();
-            writer.writeCharacters("\n");
-        }
-    }
-
-    private void writeIndent(XMLStreamWriter writer, int indent) throws Exception {
-        for (int i = 0; i < indent; i++) {
-            writer.writeCharacters("  "); // 2 пробела на уровень
-        }
-    }
-
-    public Map<String, Person> getPersons() {
-        return persons;
+        marshaller.marshal(peopleWrapper, new File(outputFile));
     }
 }

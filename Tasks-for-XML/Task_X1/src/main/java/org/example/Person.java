@@ -1,31 +1,85 @@
 package org.example;
 
+import jakarta.xml.bind.annotation.*;
 import java.util.*;
-import java.util.Objects;
 
+@XmlRootElement(name = "person")
+@XmlAccessorType(XmlAccessType.FIELD)
 public class Person {
+    @XmlID
+    @XmlAttribute(name = "id")
     private String id;
+
+    @XmlElement
     private String firstName;
+
+    @XmlElement
     private String lastName;
+
+    @XmlElement
     private String gender;
+
+    @XmlTransient
     private Person spouse;
-    private Set<Person> parents;
-    private Set<Person> children;
-    private Set<Person> brothers;
-    private Set<Person> sisters;
-    private Set<Person> siblings; // Временное хранение siblings с неизвестным полом
+
+    @XmlIDREF
+    @XmlElement
+    private Person husband;
+
+    @XmlIDREF
+    @XmlElement
+    private Person wife;
+
+    @XmlIDREF
+    @XmlElement
+    private Person father;
+
+    @XmlIDREF
+    @XmlElement
+    private Person mother;
+
+    @XmlTransient
+    private Set<Person> parents = new HashSet<>();
+
+    @XmlTransient
+    private Set<Person> children = new HashSet<>();
+
+    @XmlElementWrapper(name = "sons")
+    @XmlElement(name = "son")
+    @XmlIDREF
+    private Set<Person> sons = new HashSet<>();
+
+    @XmlElementWrapper(name = "daughters")
+    @XmlElement(name = "daughter")
+    @XmlIDREF
+    private Set<Person> daughters = new HashSet<>();
+
+    @XmlElementWrapper(name = "brothers")
+    @XmlElement(name = "brother")
+    @XmlIDREF
+    private Set<Person> brothers = new HashSet<>();
+
+    @XmlElementWrapper(name = "sisters")
+    @XmlElement(name = "sister")
+    @XmlIDREF
+    private Set<Person> sisters = new HashSet<>();
+
+    @XmlTransient
+    private Set<Person> siblings = new HashSet<>();
+
+    @XmlTransient
     private Integer childrenNumber;
+
+    @XmlTransient
     private Integer siblingsNumber;
-    private Integer unknownParents;
+
+    @XmlTransient
+    private Integer unknownParents = 0;
+
+    public Person() {} // JAXB требует пустой конструктор
 
     public Person(String id) {
         this.id = id;
-        this.parents = new HashSet<>();
-        this.children = new HashSet<>();
-        this.brothers = new HashSet<>();
-        this.sisters = new HashSet<>();
-        this.siblings = new HashSet<>();
-        this.unknownParents = 0;
     }
 
     // Геттеры и сеттеры
@@ -44,12 +98,30 @@ public class Person {
     public Person getSpouse() { return spouse; }
     public void setSpouse(Person spouse) { this.spouse = spouse; }
 
+    public Person getHusband() { return husband; }
+    public void setHusband(Person husband) { this.husband = husband; }
+
+    public Person getWife() { return wife; }
+    public void setWife(Person wife) { this.wife = wife; }
+
+    public Person getFather() { return father; }
+    public void setFather(Person father) { this.father = father; }
+
+    public Person getMother() { return mother; }
+    public void setMother(Person mother) { this.mother = mother; }
+
     public List<Person> getParents() { return new ArrayList<>(parents); }
     public void addParent(Person parentId) { parents.add(parentId); }
 
     public List<Person> getChildren() { return new ArrayList<>(children); }
     public void addChild(Person childId) { children.add(childId); }
     public void removeChild(Person childId) { children.remove(childId); }
+
+    public List<Person> getSons() { return new ArrayList<>(sons); }
+    public void addSon(Person sonId) { sons.add(sonId); }
+
+    public List<Person> getDaughters() { return new ArrayList<>(daughters); }
+    public void addDaughter(Person daughterId) { daughters.add(daughterId); }
 
     public List<Person> getBrothers() { return new ArrayList<>(brothers); }
     public void addBrother(Person brotherId) { brothers.add(brotherId); }

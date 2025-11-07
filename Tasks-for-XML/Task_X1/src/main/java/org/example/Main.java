@@ -5,7 +5,7 @@ import java.util.Set;
 public class Main {
     public static void main(String[] args) throws Exception{
         String input = "people.xml";
-        String output = "D:/Github/Data-processing-and-storage/Tasks-for-XML/Task_X1/output.xml";
+        String output = "output.xml";
 
         Set<String> elementNames = ElementNames.GetAllNames(input);
 
