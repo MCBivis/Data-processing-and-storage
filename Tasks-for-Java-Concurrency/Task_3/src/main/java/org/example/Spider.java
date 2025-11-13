@@ -18,21 +18,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Spider для задания "Асинхронный обход ресурсов HTTP-сервера".
- * Требует Java 21 (виртуальные потоки).
- *
- * Выводит строки message, отсортированные лексикографически.
- */
 public class Spider {
-    // таймаут на весь обход (секунд)
-    private static final long GLOBAL_TIMEOUT_SECONDS = 130L;
+    // таймаут на весь обход
+    private static final long GLOBAL_TIMEOUT_SECONDS = 120L;
 
-    // простой парсинг JSON-формата, ожидаем:
-    // { "message": "text", "successors": ["path1","path2", ...] }
-    private static final Pattern MESSAGE_PATTERN = Pattern.compile("\"message\"\\s*:\\s*\"((?:\\\\\"|[^\"])*)\"");
-    private static final Pattern SUCCESSORS_ARRAY_PATTERN = Pattern.compile("\"successors\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
-    private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\\"|[^\"])*)\"");
+    // простой парсинг JSON-формата
+    private static final Pattern MESSAGE_PATTERN = Pattern.compile("\"message\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern SUCCESSORS_ARRAY_PATTERN = Pattern.compile("\"successors\"\\s*:\\s*\\[(.*)\\]", Pattern.DOTALL);
+    private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"([^\"]*)\"");
 
     private final HttpClient httpClient;
     private final String host;
@@ -57,7 +50,7 @@ public class Spider {
                 .build();
     }
 
-    public void start() throws Exception {
+    public void start(){
         submitPath("/");
 
         // ждём завершения либо таймаут
@@ -77,7 +70,7 @@ public class Spider {
 
     private void submitPath(String rawPath) {
         String normalized = normalizePath(rawPath);
-        // atomic: если уже посещали — не добавляем
+        // если уже посещали — не добавляем
         if (!visited.add(normalized)) return;
 
         pending.incrementAndGet();
@@ -114,16 +107,14 @@ public class Spider {
                     submitPath(s);
                 }
             }
-            // иначе игнорируем не-200
+            // иначе игнорируем - не 200
         } catch (IOException | InterruptedException e) {
-            // сетевые ошибки игнорируем (можно логировать)
+            // ошибки игнорируем
         }
     }
 
     private URI buildUri(String path) {
-        // path может или не может начинаться с '/'
-        String p = path.startsWith("/") ? path : "/" + path;
-        String s = String.format("http://%s:%d%s", host, port, p);
+        String s = String.format("http://%s:%d%s", host, port, path);
         return URI.create(s);
     }
 
@@ -135,7 +126,7 @@ public class Spider {
     private String parseMessage(String json) {
         Matcher m = MESSAGE_PATTERN.matcher(json);
         if (m.find()) {
-            return unescapeJsonString(m.group(1));
+            return m.group(1);
         }
         return null;
     }
@@ -147,53 +138,17 @@ public class Spider {
             String inside = arrayMatcher.group(1);
             Matcher q = QUOTED_STRING_PATTERN.matcher(inside);
             while (q.find()) {
-                out.add(unescapeJsonString(q.group(1)));
+                out.add(q.group(1));
             }
         }
         return out;
     }
 
-    // очень простое "unescape" для JSON-строк (обрабатываем основное: \" \\ \/ \n \r \t \b \f)
-    private String unescapeJsonString(String s) {
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); ) {
-            char c = s.charAt(i++);
-            if (c == '\\' && i < s.length()) {
-                char e = s.charAt(i++);
-                switch (e) {
-                    case '\"': sb.append('"'); break;
-                    case '\\': sb.append('\\'); break;
-                    case '/': sb.append('/'); break;
-                    case 'b': sb.append('\b'); break;
-                    case 'f': sb.append('\f'); break;
-                    case 'n': sb.append('\n'); break;
-                    case 'r': sb.append('\r'); break;
-                    case 't': sb.append('\t'); break;
-                    case 'u':
-                        if (i + 4 <= s.length()) {
-                            String hex = s.substring(i, i+4);
-                            try {
-                                int code = Integer.parseInt(hex, 16);
-                                sb.append((char) code);
-                            } catch (NumberFormatException ignored) { }
-                            i += 4;
-                        }
-                        break;
-                    default:
-                        sb.append(e);
-                }
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args){
         String host = "localhost";
         int port = 8080;
-        if (args.length >= 1) host = args[0];
-        if (args.length >= 2) {
+        if (args.length > 0) host = args[0];
+        if (args.length > 1) {
             try { port = Integer.parseInt(args[1]); } catch (NumberFormatException ignored) { }
         }
 
