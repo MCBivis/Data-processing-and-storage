@@ -55,8 +55,6 @@ public class NormalizationProcessor {
             }
             
             // Step 2: Insert relationships (only for persons that exist in both tables)
-            // For symmetric relations (spouse, sibling) we insert only ONE row per пару,
-            // используя канонический порядок (LEAST/GREATEST), чтобы не было дубликатов A-B и B-A.
             System.out.println("Step 2: Copying relationships to normalized schema...");
             try (Statement stmt = conn.createStatement()) {
                 int relationshipCount = stmt.executeUpdate("""
