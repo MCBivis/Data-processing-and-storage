@@ -2,8 +2,9 @@ package org.example.service;
 
 import org.example.dto.RouteLeg;
 import org.example.dto.RouteOption;
+import org.example.repository.RouteSearchRepository;
+import org.example.repository.RouteSearchRepository.ScheduledFlightRow;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -30,16 +31,16 @@ public class RouteSearchService {
     private static final int UNBOUND_MAX_LEGS = 16;
     private static final int MAX_RESULTS = 200;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final RouteSearchRepository routeSearchRepository;
     private final PointResolver pointResolver;
     private final ZoneId routeZone;
 
     public RouteSearchService(
-            JdbcTemplate jdbcTemplate,
+            RouteSearchRepository routeSearchRepository,
             PointResolver pointResolver,
             @Value("${app.route-search.time-zone:UTC}") String zoneId
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.routeSearchRepository = routeSearchRepository;
         this.pointResolver = pointResolver;
         this.routeZone = ZoneId.of(zoneId);
     }
@@ -62,34 +63,37 @@ public class RouteSearchService {
                 ? UNBOUND_MAX_LEGS
                 : Math.min(UNBOUND_MAX_LEGS, maxConnections + 1);
 
-        List<CandidateFlight> all = loadFlights(windowStart, windowEnd);
-        Map<String, List<CandidateFlight>> byDeparture = new HashMap<>();
-        for (CandidateFlight f : all) {
+        List<ScheduledFlightRow> all = routeSearchRepository.findFlightsDepartingBetween(
+                Timestamp.from(windowStart),
+                Timestamp.from(windowEnd)
+        );
+        Map<String, List<ScheduledFlightRow>> byDeparture = new HashMap<>();
+        for (ScheduledFlightRow f : all) {
             byDeparture.computeIfAbsent(f.departureAirport(), k -> new ArrayList<>()).add(f);
         }
 
-        List<List<CandidateFlight>> rawPaths = new ArrayList<>();
+        List<List<ScheduledFlightRow>> rawPaths = new ArrayList<>();
         Queue<PathState> queue = new ArrayDeque<>();
 
         for (String origin : origins) {
-            for (CandidateFlight first : byDeparture.getOrDefault(origin, List.of())) {
-                    if (destinations.contains(first.arrivalAirport())) {
-                        rawPaths.add(List.of(first));
-                        if (rawPaths.size() >= MAX_RESULTS) {
-                            return finalizePaths(rawPaths, fare);
-                        }
+            for (ScheduledFlightRow first : byDeparture.getOrDefault(origin, List.of())) {
+                if (destinations.contains(first.arrivalAirport())) {
+                    rawPaths.add(List.of(first));
+                    if (rawPaths.size() >= MAX_RESULTS) {
+                        return finalizePaths(rawPaths, fare);
                     }
-                    if (maxLegs > 1) {
-                        queue.add(PathState.start(first));
-                    }
+                }
+                if (maxLegs > 1) {
+                    queue.add(PathState.start(first));
+                }
             }
         }
 
         outer:
         while (!queue.isEmpty() && rawPaths.size() < MAX_RESULTS) {
             PathState state = queue.poll();
-            CandidateFlight last = state.lastFlight();
-            for (CandidateFlight next : byDeparture.getOrDefault(last.arrivalAirport(), List.of())) {
+            ScheduledFlightRow last = state.lastFlight();
+            for (ScheduledFlightRow next : byDeparture.getOrDefault(last.arrivalAirport(), List.of())) {
                 Instant earliestNext = last.scheduledArrival().toInstant().plus(MIN_CONNECTION);
                 if (!next.scheduledDeparture().toInstant().isBefore(earliestNext)
                         && next.scheduledDeparture().toInstant().isBefore(windowEnd)) {
@@ -111,31 +115,31 @@ public class RouteSearchService {
         }
 
         rawPaths.sort(Comparator
-                .<List<CandidateFlight>>comparingInt(List::size)
+                .<List<ScheduledFlightRow>>comparingInt(List::size)
                 .thenComparing(p -> p.get(0).scheduledDeparture()));
 
         return finalizePaths(rawPaths, fare);
     }
 
-    private List<RouteOption> finalizePaths(List<List<CandidateFlight>> paths, String fare) {
+    private List<RouteOption> finalizePaths(List<List<ScheduledFlightRow>> paths, String fare) {
         if (paths.isEmpty()) {
             return List.of();
         }
         Set<Integer> ids = new HashSet<>();
-        for (List<CandidateFlight> p : paths) {
-            for (CandidateFlight f : p) {
+        for (List<ScheduledFlightRow> p : paths) {
+            for (ScheduledFlightRow f : p) {
                 ids.add(f.flightId());
             }
         }
-        Map<Integer, BigDecimal> prices = loadPrices(ids, fare);
-        Map<Integer, Integer> availability = loadAvailability(ids, fare);
+        Map<Integer, BigDecimal> prices = routeSearchRepository.loadPricesByFlightIds(ids, fare);
+        Map<Integer, Integer> availability = routeSearchRepository.loadFreeSeatsByFlightIds(ids, fare);
 
         List<RouteOption> out = new ArrayList<>();
-        for (List<CandidateFlight> p : paths) {
+        for (List<ScheduledFlightRow> p : paths) {
             boolean ok = true;
             BigDecimal total = BigDecimal.ZERO;
             List<RouteLeg> legs = new ArrayList<>();
-            for (CandidateFlight f : p) {
+            for (ScheduledFlightRow f : p) {
                 if (availability.getOrDefault(f.flightId(), 0) == 0) {
                     ok = false;
                     break;
@@ -159,103 +163,6 @@ public class RouteSearchService {
         return out;
     }
 
-    private List<CandidateFlight> loadFlights(Instant from, Instant to) {
-        return jdbcTemplate.query(
-                """
-                        SELECT f.flight_id,
-                               trim(f.route_no) AS route_no,
-                               f.scheduled_departure,
-                               f.scheduled_arrival,
-                               trim(r.departure_airport) AS departure_airport,
-                               trim(r.arrival_airport) AS arrival_airport
-                        FROM bookings.flights f
-                        JOIN bookings.routes r
-                          ON r.route_no = f.route_no
-                         AND r.validity @> f.scheduled_departure
-                        WHERE f.status <> 'Cancelled'
-                          AND f.scheduled_departure >= ?
-                          AND f.scheduled_departure < ?
-                        """,
-                (rs, rowNum) -> new CandidateFlight(
-                        rs.getInt("flight_id"),
-                        rs.getString("route_no"),
-                        rs.getString("departure_airport"),
-                        rs.getString("arrival_airport"),
-                        toOffset(rs.getTimestamp("scheduled_departure")),
-                        toOffset(rs.getTimestamp("scheduled_arrival"))
-                ),
-                Timestamp.from(from),
-                Timestamp.from(to)
-        );
-    }
-
-    private Map<Integer, BigDecimal> loadPrices(Set<Integer> flightIds, String fare) {
-        if (flightIds.isEmpty()) {
-            return Map.of();
-        }
-        String inClause = flightIds.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(","));
-        List<Object> args = new ArrayList<>();
-        args.add(fare);
-        args.add(fare);
-        args.addAll(flightIds);
-        String sql = """
-                SELECT f.flight_id,
-                       COALESCE(
-                         (SELECT ROUND(AVG(s.price), 2)
-                          FROM bookings.segments s
-                          WHERE s.flight_id = f.flight_id AND s.fare_conditions = ?),
-                         (SELECT u.predicted_price
-                          FROM bookings.upcoming_flight_prices u
-                          WHERE u.flight_id = f.flight_id AND u.fare_conditions = ?
-                          LIMIT 1),
-                         100.00
-                       ) AS price
-                FROM bookings.flights f
-                WHERE f.flight_id IN (""" + inClause + ")";
-        Map<Integer, BigDecimal> map = new HashMap<>();
-        jdbcTemplate.query(sql, rs -> {
-            map.put(rs.getInt("flight_id"), rs.getBigDecimal("price"));
-        }, args.toArray());
-        return map;
-    }
-
-    private Map<Integer, Integer> loadAvailability(Set<Integer> flightIds, String fare) {
-        Map<Integer, Integer> map = new HashMap<>();
-        if (flightIds.isEmpty()) {
-            return map;
-        }
-        String inClause = flightIds.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(","));
-        List<Object> args = new ArrayList<>();
-        args.add(fare);
-        args.add(fare);
-        args.addAll(flightIds);
-        String sql = """
-                SELECT f.flight_id,
-                       GREATEST(0,
-                         (SELECT COUNT(*)::int
-                          FROM bookings.seats s
-                          WHERE s.airplane_code = r.airplane_code
-                            AND s.fare_conditions = ?)
-                         -
-                         (SELECT COUNT(*)::int
-                          FROM bookings.boarding_passes bp
-                          JOIN bookings.seats s2
-                            ON s2.airplane_code = r.airplane_code
-                           AND s2.seat_no = bp.seat_no
-                           AND s2.fare_conditions = ?
-                          WHERE bp.flight_id = f.flight_id)
-                       ) AS free_seats
-                FROM bookings.flights f
-                JOIN bookings.routes r
-                  ON r.route_no = f.route_no
-                 AND r.validity @> f.scheduled_departure
-                WHERE f.flight_id IN (""" + inClause + ")";
-        jdbcTemplate.query(sql, rs -> {
-            map.put(rs.getInt("flight_id"), rs.getInt("free_seats"));
-        }, args.toArray());
-        return map;
-    }
-
     private static String normalizeFare(String bookingClass) {
         if (bookingClass == null || bookingClass.isBlank()) {
             throw new IllegalArgumentException("bookingClass is required");
@@ -267,40 +174,23 @@ public class RouteSearchService {
         return f;
     }
 
-    private static java.time.OffsetDateTime toOffset(Timestamp ts) {
-        if (ts == null) {
-            return null;
-        }
-        return ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
-    }
-
-    private record CandidateFlight(
-            int flightId,
-            String routeNo,
-            String departureAirport,
-            String arrivalAirport,
-            java.time.OffsetDateTime scheduledDeparture,
-            java.time.OffsetDateTime scheduledArrival
-    ) {
-    }
-
     private static final class PathState {
-        private final List<CandidateFlight> flights;
+        private final List<ScheduledFlightRow> flights;
         private final Set<String> visited;
 
-        private PathState(List<CandidateFlight> flights, Set<String> visited) {
+        private PathState(List<ScheduledFlightRow> flights, Set<String> visited) {
             this.flights = flights;
             this.visited = visited;
         }
 
-        static PathState start(CandidateFlight first) {
+        static PathState start(ScheduledFlightRow first) {
             Set<String> v = new HashSet<>();
             v.add(first.departureAirport());
             v.add(first.arrivalAirport());
             return new PathState(List.of(first), v);
         }
 
-        CandidateFlight lastFlight() {
+        ScheduledFlightRow lastFlight() {
             return flights.get(flights.size() - 1);
         }
 
@@ -308,8 +198,8 @@ public class RouteSearchService {
             return visited.contains(nextArrival);
         }
 
-        PathState append(CandidateFlight next) {
-            List<CandidateFlight> nf = new ArrayList<>(flights.size() + 1);
+        PathState append(ScheduledFlightRow next) {
+            List<ScheduledFlightRow> nf = new ArrayList<>(flights.size() + 1);
             nf.addAll(flights);
             nf.add(next);
             Set<String> nv = new HashSet<>(visited);
@@ -317,7 +207,7 @@ public class RouteSearchService {
             return new PathState(List.copyOf(nf), nv);
         }
 
-        List<CandidateFlight> flights() {
+        List<ScheduledFlightRow> flights() {
             return flights;
         }
     }

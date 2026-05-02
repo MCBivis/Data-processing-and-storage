@@ -1,6 +1,6 @@
 package org.example.service;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.example.repository.AirportRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashSet;
@@ -13,10 +13,10 @@ import java.util.Set;
 @Component
 public class PointResolver {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final AirportRepository airportRepository;
 
-    public PointResolver(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public PointResolver(AirportRepository airportRepository) {
+        this.airportRepository = airportRepository;
     }
 
     public Set<String> resolveAirportCodes(String point) {
@@ -26,39 +26,16 @@ public class PointResolver {
         String trimmed = point.trim();
         if (trimmed.length() == 3 && trimmed.chars().allMatch(Character::isLetter)) {
             String code = trimmed.toUpperCase();
-            Integer n = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM bookings.airports_data WHERE airport_code = ?",
-                    Integer.class,
-                    code
-            );
-            if (n != null && n > 0) {
+            if (airportRepository.countByAirportCode(code) > 0) {
                 return Set.of(code);
             }
         }
-        List<String> byCity = jdbcTemplate.queryForList(
-                """
-                        SELECT airport_code
-                        FROM bookings.airports_data
-                        WHERE lower(city->>'en') = lower(?)
-                        ORDER BY airport_code
-                        """,
-                String.class,
-                trimmed
-        );
+        List<String> byCity = airportRepository.findAirportCodesByCityNameEn(trimmed);
         if (!byCity.isEmpty()) {
             return new LinkedHashSet<>(byCity);
         }
 
-        List<String> byAirport = jdbcTemplate.queryForList(
-                """
-                        SELECT airport_code
-                        FROM bookings.airports_data
-                        WHERE lower(airport_name->>'en') = lower(?)
-                        ORDER BY airport_code
-                        """,
-                String.class,
-                trimmed
-        );
+        List<String> byAirport = airportRepository.findAirportCodesByAirportNameEn(trimmed);
         if (!byAirport.isEmpty()) {
             return new LinkedHashSet<>(byAirport);
         }
